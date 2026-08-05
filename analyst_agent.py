@@ -12,8 +12,9 @@ class EvaluationResult:
     opportunity: ScoutOpportunity
     total_score: int
     score_breakdown: Dict[str, int]
-    alert_type: str  # 'PRE_ALERT' (65-79), 'ENTRY_ELIGIBLE' (80+), 'REJECTED' (<65)
-    direction: str   # 'BUY' ou 'SELL'
+    alert_type: str        # 'PRE_ALERT' (65-79), 'ENTRY_ELIGIBLE' (80+), 'REJECTED' (<65)
+    setup_scenario: str    # 'CENÁRIO 1: Reversão por Captura de Liquidez (Sweep + FVG + POI)', 'CENÁRIO 2: Continuidade de Fluxo (BOS + OB)', etc.
+    direction: str         # 'BUY' ou 'SELL'
     entry_price: float
     stop_loss: float
     take_profit_1: float
@@ -25,15 +26,12 @@ class EvaluationResult:
 
 class AnalystAgent:
     """
-    🧠 ANALYST AGENT
-    Aplica o modelo rigoroso de pontuação de 100 pontos no TradePilot AI:
-    - Contexto (15m): 15 pts
-    - Mapeamento de Liquidez: 15 pts
-    - Qualidade do Sweep: 15 pts
-    - Deslocamento (Displacement): 15 pts
-    - Mudança de Estrutura (MSS/CHoCH 1m): 15 pts
-    - POI & FVG: 10 pts
-    - Relação Risco/Retorno (R:R >= 3:1): 15 pts
+    🧠 ANALYST AGENT (PEIXE GRANDE SMC EDITION)
+    Analisa e classifica as oportunidades estritamente de acordo com os cenários
+    dos vídeos do Peixe Grande Trading:
+    - Cenário 1: Captura de Liquidez (Sweep) + FVG + Mitigação do POI
+    - Cenário 2: Continuidade de Fluxo Institucional (BOS + OB + Reteste)
+    - Cenário 3: Confirmação Estrita por CHoCH no 1m
     """
 
     def __init__(self, buffer_percent: float = 0.0005):
@@ -50,26 +48,34 @@ class AnalystAgent:
         df_1m = opp.df_1m
         cp = opp.current_price
 
+        # Classificação do Cenário do Vídeo do Peixe Grande
+        if opp.has_sweep and opp.has_fvg:
+            setup_scenario = "CENÁRIO 1: Reversão por Captura de Liquidez (Sweep + FVG + POI)"
+        elif opp.has_fvg:
+            setup_scenario = "CENÁRIO 2: Continuidade de Fluxo Institucional (BOS + Order Block)"
+        else:
+            setup_scenario = "CENÁRIO 3: Reação de POI com Confirmação no 1m"
+
         # 1. CONTEXTO DE MERCADO (15m) - 15 pts
         trend_15m_up = df_15m['close'].iloc[-1] > df_15m['close'].iloc[-10]
         if (opp.direction == 'BULLISH' and trend_15m_up) or (opp.direction == 'BEARISH' and not trend_15m_up):
             score += 15
             breakdown['Contexto (15m)'] = 15
-            reasons.append("Estrutura macro de 15m alinhada com a direção da operação.")
+            reasons.append("Estrutura macro de 15m a favor do fluxo institucional.")
         else:
             score += 5
             breakdown['Contexto (15m)'] = 5
             risks.append("Operação contra a tendência primária de 15m.")
 
-        # 2. MAPEAMENTO DE LIQUIDED (BSL / SSL) - 15 pts
+        # 2. MAPEAMENTO DE LIQUIDEZ (SSL / BSL) - 15 pts
         if opp.has_sweep:
             score += 15
-            breakdown['Liquidez'] = 15
-            reasons.append("Pool de liquidez relevante varrido antes do toque no POI.")
+            breakdown['Liquidez (Sweep)'] = 15
+            reasons.append("Captura de Liquidez (Stop Hunt do varejo) confirmada antes da entrada.")
         else:
             score += 8
-            breakdown['Liquidez'] = 8
-            risks.append("Liquidez ainda não varrida completamente.")
+            breakdown['Liquidez (Sweep)'] = 8
+            risks.append("Liquidez ainda não varrida (possível indução secundária).")
 
         # 3. QUALIDADE DO SWEEP (Rejeição de Pavio) - 15 pts
         candle_5m = df_5m.iloc[-1]
@@ -77,19 +83,19 @@ class AnalystAgent:
         body_size = abs(candle_5m['close'] - candle_5m['open'])
         if wick_size > 0 and (body_size / wick_size) < 0.5:
             score += 15
-            breakdown['Sweep Quality'] = 15
-            reasons.append("Forte pavio de rejeição demonstrando absorção institucional.")
+            breakdown['Absorção (Pavio)'] = 15
+            reasons.append("Pavio de rejeição expressivo (Absorção das ordens de varejo pelo Peixe Grande).")
         else:
             score += 10
-            breakdown['Sweep Quality'] = 10
+            breakdown['Absorção (Pavio)'] = 10
 
-        # 4. DESLOCAMENTO (Displacement) - 15 pts
+        # 4. DESLOCAMENTO (Displacement / Impulso) - 15 pts
         vol_5m = df_5m['volume'].tail(5).mean()
         avg_vol = df_5m['volume'].mean()
         if vol_5m > avg_vol * 1.2:
             score += 15
             breakdown['Deslocamento'] = 15
-            reasons.append("Deslocamento com volume acima da média institucional.")
+            reasons.append("Deslocamento de preço agressivo com volume institucional elevado.")
         else:
             score += 10
             breakdown['Deslocamento'] = 10
@@ -98,14 +104,13 @@ class AnalystAgent:
         if opp.has_fvg:
             score += 10
             breakdown['POI & FVG'] = 10
-            reasons.append("Order Block validado com Fair Value Gap (FVG) não mitigado.")
+            reasons.append("Order Block (OB) validado com Ineficiência / Fair Value Gap (FVG).")
         else:
             score += 5
             breakdown['POI & FVG'] = 5
-            risks.append("Order Block sem desequilíbrio (FVG) evidente.")
+            risks.append("Order Block sem ineficiência (FVG) evidente.")
 
-        # 6. MUDANÇA DE ESTRUTURA (MSS / CHoCH 1m) & ESTRUTURA - 15 pts
-        # Verifica se no 1m houve rompimento da última máxima/mínima
+        # 6. GATILHO CHoCH (1m) - 15 pts
         recent_1m_high = df_1m['high'].tail(10).max()
         recent_1m_low = df_1m['low'].tail(10).min()
         
@@ -118,13 +123,13 @@ class AnalystAgent:
         if has_choch:
             score += 15
             breakdown['CHoCH (1m)'] = 15
-            reasons.append("CHoCH (Mudança de Caráter) confirmado no gráfico de 1m.")
+            reasons.append("Gatilho CHoCH (Mudança de Caráter) confirmado no gráfico de 1m.")
         else:
             score += 5
             breakdown['CHoCH (1m)'] = 5
-            risks.append("Gatilho de CHoCH no 1m ainda em desenvolvimento.")
+            risks.append("CHoCH de 1m ainda em formação (entrada por mitigação direta).")
 
-        # 7. CÁLCULO DE RISCO / RETORNO (R:R >= 3.0) - 15 pts
+        # 7. RISCO / RETORNO (Mínimo 3R) - 15 pts
         direction = 'BUY' if opp.direction == 'BULLISH' else 'SELL'
         if direction == 'BUY':
             stop_loss = opp.poi_low * (1 - self.buffer_percent)
@@ -148,7 +153,7 @@ class AnalystAgent:
         if rr_ratio >= config.MIN_RISK_REWARD:
             score += 15
             breakdown['Risco/Retorno'] = 15
-            reasons.append(f"Relação Risco:Retorno excelente (1:{rr_ratio:.2f} >= 1:3.0).")
+            reasons.append(f"Excelente Relação Risco:Retorno (1:{rr_ratio:.2f} >= 1:3.0).")
         elif rr_ratio >= 2.0:
             score += 10
             breakdown['Risco/Retorno'] = 10
@@ -157,7 +162,7 @@ class AnalystAgent:
             breakdown['Risco/Retorno'] = 5
             risks.append("Relação R:R abaixo de 1:3.")
 
-        # DETERMINA O TIPO DE ALERTA BASEADO NO SCORE
+        # Classificação do Tipo de Alerta
         if score >= config.ENTRY_ALERT_MIN_SCORE:
             alert_type = 'ENTRY_ELIGIBLE'
         elif score >= config.PRE_ALERT_MIN_SCORE:
@@ -170,6 +175,7 @@ class AnalystAgent:
             total_score=score,
             score_breakdown=breakdown,
             alert_type=alert_type,
+            setup_scenario=setup_scenario,
             direction=direction,
             entry_price=round(cp, 4),
             stop_loss=round(stop_loss, 4),

@@ -8,10 +8,11 @@ logger = logging.getLogger(__name__)
 
 class MessengerAgent:
     """
-    📢 MESSENGER AGENT
-    Formata e envia alertas explicativos no Telegram para:
-    1. Pró-Alertas (Setup em Formação: Score 65-79)
-    2. Alertas Elegíveis de Entrada (Score 80+ com R:R >= 3:1)
+    📢 MESSENGER AGENT (PEIXE GRANDE EDITION)
+    Formata alertas elegantes no Telegram com a classificação do Cenário do Vídeo:
+    - Cenário 1: Reversão por Captura de Liquidez (Sweep + FVG + POI)
+    - Cenário 2: Continuidade de Fluxo Institucional (BOS + OB)
+    - Cenário 3: Reação no POI com Confirmação no 1m
     """
 
     def __init__(self, bot_token: str, chat_id: str):
@@ -28,6 +29,7 @@ class MessengerAgent:
 
         msg = (
             f"⚡ <b>[TRADEPILOT AI] - PRÓ-ALERTA (SETUP EM FORMAÇÃO)</b> ⚡\n\n"
+            f"🎬 <b>Setup Peixe Grande:</b>\n<code>{eval_res.setup_scenario}</code>\n\n"
             f"📌 <b>Ativo:</b> <code>{opp.symbol}</code> | <b>Direção:</b> {dir_str}\n"
             f"📊 <b>Score Técnico:</b> <code>{eval_res.total_score}/100 pts</code> ⚠️ (Em Desenvolvimento)\n"
             f"⏱ <b>Timeframes:</b> 15m Contexto ➔ 5m POI\n\n"
@@ -53,6 +55,7 @@ class MessengerAgent:
 
         msg = (
             f"{header}\n\n"
+            f"🎬 <b>Setup Peixe Grande:</b>\n<code>{eval_res.setup_scenario}</code>\n\n"
             f"📌 <b>Ativo:</b> <code>{opp.symbol}</code>\n"
             f"⚡ <b>Direção:</b> {dir_str}\n"
             f"⭐ <b>Score do Setup:</b> <b><code>{eval_res.total_score} / 100 PTS</code></b> ✅\n"
