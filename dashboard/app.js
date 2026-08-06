@@ -3,20 +3,23 @@ const SUPABASE_URL = "https://skrnjqpoxwjuaffoctsp.supabase.co";
 const SUPABASE_KEY = "sb_publishable_mNTPWQkt-KxFUdGn7qZ0VQ_jCGCh76a";
 
 const SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT'];
+let currentTvWidget = null;
+let currentActiveSymbol = 'BINANCE:BTCUSDT';
 
 // Dados em Memória
 let allSetups = [];
 let assetStatus = {
-    'BTC/USDT': { price: 64620.50, poiLow: 64580.00, poiHigh: 64650.00, sweep: true, fvg: true, choch: true, direction: 'BUY', score: 83 },
-    'ETH/USDT': { price: 1912.20, poiLow: 1908.00, poiHigh: 1914.00, sweep: true, fvg: true, choch: true, direction: 'SELL', score: 78 },
-    'SOL/USDT': { price: 73.50, poiLow: 73.20, poiHigh: 73.60, sweep: true, fvg: true, choch: true, direction: 'BUY', score: 85 },
-    'BNB/USDT': { price: 594.30, poiLow: 593.00, poiHigh: 595.00, sweep: false, fvg: true, choch: false, direction: 'BUY', score: 68 },
-    'XRP/USDT': { price: 1.0510, poiLow: 1.0500, poiHigh: 1.0520, sweep: true, fvg: true, choch: true, direction: 'SELL', score: 80 },
-    'ADA/USDT': { price: 0.4250, poiLow: 0.4220, poiHigh: 0.4260, sweep: false, fvg: true, choch: true, direction: 'BUY', score: 72 }
+    'BTC/USDT': { symbolTv: 'BINANCE:BTCUSDT', price: 64620.50, poiLow: 64580.00, poiHigh: 64650.00, sweep: true, fvg: true, choch: true, direction: 'BUY', score: 83 },
+    'ETH/USDT': { symbolTv: 'BINANCE:ETHUSDT', price: 1912.20, poiLow: 1908.00, poiHigh: 1914.00, sweep: true, fvg: true, choch: true, direction: 'SELL', score: 78 },
+    'SOL/USDT': { symbolTv: 'BINANCE:SOLUSDT', price: 73.50, poiLow: 73.20, poiHigh: 73.60, sweep: true, fvg: true, choch: true, direction: 'BUY', score: 85 },
+    'BNB/USDT': { symbolTv: 'BINANCE:BNBUSDT', price: 594.30, poiLow: 593.00, poiHigh: 595.00, sweep: false, fvg: true, choch: false, direction: 'BUY', score: 68 },
+    'XRP/USDT': { symbolTv: 'BINANCE:XRPUSDT', price: 1.0510, poiLow: 1.0500, poiHigh: 1.0520, sweep: true, fvg: true, choch: true, direction: 'SELL', score: 80 },
+    'ADA/USDT': { symbolTv: 'BINANCE:ADAUSDT', price: 0.4250, poiLow: 0.4220, poiHigh: 0.4260, sweep: false, fvg: true, choch: true, direction: 'BUY', score: 72 }
 };
 
 // Inicialização da Aplicação
 document.addEventListener('DOMContentLoaded', () => {
+    initTradingViewChart('BINANCE:BTCUSDT');
     renderAssetGrid();
     fetchLiveSetups();
     setupFilterPills();
@@ -25,6 +28,28 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(fetchLiveSetups, 5000);
     setInterval(updatePricesSimulation, 3000);
 });
+
+// Inicializa o Widget do TradingView em Tempo Real
+function initTradingViewChart(symbol) {
+    currentActiveSymbol = symbol;
+    document.getElementById('selectedSymbolTag').innerText = symbol;
+
+    if (typeof TradingView !== 'undefined') {
+        new TradingView.widget({
+            "autosize": true,
+            "symbol": symbol,
+            "interval": "5",
+            "timezone": "Etc/UTC",
+            "theme": "dark",
+            "style": "1",
+            "locale": "br",
+            "toolbar_bg": "#131722",
+            "enable_publishing": false,
+            "allow_symbol_change": true,
+            "container_id": "tradingview_chart_container"
+        });
+    }
+}
 
 // Busca Setups do Supabase Cloud REST API
 async function fetchLiveSetups() {
@@ -112,9 +137,11 @@ function renderSignalsFeed(setups) {
     });
 }
 
-// Seleciona um Setup para o Visualizador Interativo
+// Seleciona um Setup e Atualiza o Gráfico TradingView ao Vivo
 function selectSetupForVisualizer(s) {
-    document.getElementById('selectedSymbolTag').innerText = `${s.symbol} (${s.direction})`;
+    const tvSym = `BINANCE:${s.symbol.replace('/', '')}`;
+    initTradingViewChart(tvSym);
+
     document.getElementById('setupScenarioTitle').innerText = s.setup_scenario || 'CENÁRIO 1: Reversão por Captura de Liquidez';
     document.getElementById('valEntry').innerText = `$${s.entry_price}`;
     document.getElementById('valStop').innerText = `$${s.stop_loss}`;
@@ -123,7 +150,8 @@ function selectSetupForVisualizer(s) {
 }
 
 function selectAssetForVisualizer(sym, info) {
-    document.getElementById('selectedSymbolTag').innerText = `${sym} (${info.direction})`;
+    initTradingViewChart(info.symbolTv);
+
     document.getElementById('valEntry').innerText = `$${info.price.toFixed(2)}`;
     document.getElementById('valStop').innerText = `$${(info.price * 0.995).toFixed(2)}`;
     document.getElementById('valTp1').innerText = `$${(info.price * 1.01).toFixed(2)}`;

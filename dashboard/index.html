@@ -8,8 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-    <!-- FontAwesome / Feather Icons -->
+    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- TradingView Widget Script -->
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="dark-theme">
@@ -88,7 +90,7 @@
         <section class="scanner-section glassmorphism">
             <div class="section-header">
                 <h2><i data-lucide="radar"></i> Varredura em Tempo Real dos Ativos (SMC 5m/15m)</h2>
-                <span class="subtitle">Atualizado a cada 5 segundos diretamente dos Agentes de IA</span>
+                <span class="subtitle">Clique em qualquer ativo para carregar o gráfico TradingView ao vivo</span>
             </div>
 
             <div class="asset-grid" id="assetScannerGrid">
@@ -96,10 +98,10 @@
             </div>
         </section>
 
-        <!-- Main Content Area: Signals Feed & Live SMC Chart -->
+        <!-- Main Content Area: Signals Feed & Live TradingView Chart -->
         <div class="two-column-layout">
 
-            <!-- Left: Signals History & Threaded Feed -->
+            <!-- Left: Signals Feed & Threaded History -->
             <section class="signals-feed-section glassmorphism">
                 <div class="section-header">
                     <h2><i data-lucide="send"></i> Feed ao Vivo de Alertas & Sinais</h2>
@@ -115,12 +117,15 @@
                 </div>
             </section>
 
-            <!-- Right: Interactive SMC Setup Visualizer -->
+            <!-- Right: Real-Time TradingView Interactive Chart & Setup Details -->
             <section class="setup-visualizer-section glassmorphism">
                 <div class="section-header">
-                    <h2><i data-lucide="candlestick-chart"></i> Visualizador do Setup Institucional</h2>
-                    <span class="badge-mini" id="selectedSymbolTag">BTC/USDT</span>
+                    <h2><i data-lucide="candlestick-chart"></i> Gráfico TradingView ao Vivo & Níveis SMC</h2>
+                    <span class="badge-mini" id="selectedSymbolTag">BINANCE:BTCUSDT</span>
                 </div>
+
+                <!-- Embedded TradingView Real-Time Chart Container -->
+                <div id="tradingview_chart_container" style="height: 380px; border-radius: 12px; overflow: hidden; margin-bottom: 16px;"></div>
 
                 <div class="visualizer-container">
                     <div class="setup-details-box" id="setupDetailsBox">
@@ -142,16 +147,6 @@
                                 <span class="lbl">Take Profit 2 (4R)</span>
                                 <span class="val" id="valTp2">65,190.00</span>
                             </div>
-                        </div>
-
-                        <div class="smc-checklist">
-                            <h3><i data-lucide="check-circle-2"></i> Validações da Estratégia Peixe Grande</h3>
-                            <ul id="smcChecklistItems">
-                                <li class="checked"><span>✓</span> Contexto Macro de 15m a favor da tendência</li>
-                                <li class="checked"><span>✓</span> Captura de Liquidez do Pivô (Sweep/Stop Hunt)</li>
-                                <li class="checked"><span>✓</span> Fair Value Gap (FVG) não mitigado</li>
-                                <li class="checked"><span>✓</span> CHoCH (Mudança de Caráter) em 1m</li>
-                            </ul>
                         </div>
                     </div>
                 </div>
