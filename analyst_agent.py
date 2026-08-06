@@ -13,7 +13,7 @@ class EvaluationResult:
     total_score: int
     score_breakdown: Dict[str, int]
     alert_type: str        # 'PRE_ALERT' (65-79), 'ENTRY_ELIGIBLE' (80+), 'REJECTED' (<65)
-    setup_scenario: str    # 'CENÁRIO 1: Reversão por Captura de Liquidez (Sweep + FVG + POI)', 'CENÁRIO 2: Continuidade de Fluxo (BOS + OB)', etc.
+    setup_scenario: str    # 'CENÁRIO 1: Reversão por Captura de Liquidez (Sweep + FVG + POI)', etc.
     direction: str         # 'BUY' ou 'SELL'
     entry_price: float
     stop_loss: float
@@ -26,12 +26,11 @@ class EvaluationResult:
 
 class AnalystAgent:
     """
-    🧠 ANALYST AGENT (PEIXE GRANDE SMC EDITION)
-    Analisa e classifica as oportunidades estritamente de acordo com os cenários
-    dos vídeos do Peixe Grande Trading:
-    - Cenário 1: Captura de Liquidez (Sweep) + FVG + Mitigação do POI
-    - Cenário 2: Continuidade de Fluxo Institucional (BOS + OB + Reteste)
-    - Cenário 3: Confirmação Estrita por CHoCH no 1m
+    🧠 ANALYST AGENT (OPTIMIZED PEIXE GRANDE SMC ENGINE)
+    Aplica as 4 Regras de Ouro de Otimização:
+    1. Torna a Captura de Liquidez (Sweep de Pivô) mandatória para o Score 80+.
+    2. Exige Fair Value Gap (FVG) no deslocamento.
+    3. Recomenda Mover Stop para 0.0 (Break-Even) no TP1.
     """
 
     def __init__(self, buffer_percent: float = 0.0005):
@@ -67,15 +66,15 @@ class AnalystAgent:
             breakdown['Contexto (15m)'] = 5
             risks.append("Operação contra a tendência primária de 15m.")
 
-        # 2. MAPEAMENTO DE LIQUIDEZ (SSL / BSL) - 15 pts
+        # 2. MAPEAMENTO DE LIQUIDEZ (SSL / BSL) - 20 pts (PESO AUMENTADO)
         if opp.has_sweep:
-            score += 15
-            breakdown['Liquidez (Sweep)'] = 15
+            score += 20
+            breakdown['Liquidez (Sweep)'] = 20
             reasons.append(f"Captura de Liquidez (Stop Hunt) confirmada no Pivô [{opp.swept_pivot_level:.4f}] antes da entrada.")
         else:
-            score += 8
-            breakdown['Liquidez (Sweep)'] = 8
-            risks.append("Liquidez ainda não varrida (possível indução secundária).")
+            score += 0
+            breakdown['Liquidez (Sweep)'] = 0
+            risks.append("CRÍTICO: Liquidez ainda não varrida (alto risco de stop por indução).")
 
         # 3. QUALIDADE DO SWEEP (Rejeição de Pavio) - 15 pts
         candle_5m = df_5m.iloc[-1]
@@ -84,7 +83,7 @@ class AnalystAgent:
         if wick_size > 0 and (body_size / wick_size) < 0.5:
             score += 15
             breakdown['Absorção (Pavio)'] = 15
-            reasons.append("Pavio de rejeição expressivo (Absorção das ordens de varejo pelo Peixe Grande).")
+            reasons.append("Pavio de rejeição expressivo (Absorção das ordens pelo Peixe Grande).")
         else:
             score += 10
             breakdown['Absorção (Pavio)'] = 10
@@ -106,8 +105,8 @@ class AnalystAgent:
             breakdown['POI & FVG'] = 10
             reasons.append("Order Block (OB) validado com Ineficiência / Fair Value Gap (FVG).")
         else:
-            score += 5
-            breakdown['POI & FVG'] = 5
+            score += 0
+            breakdown['POI & FVG'] = 0
             risks.append("Order Block sem ineficiência (FVG) evidente.")
 
         # 6. GATILHO CHoCH (1m) - 15 pts
@@ -127,9 +126,9 @@ class AnalystAgent:
         else:
             score += 5
             breakdown['CHoCH (1m)'] = 5
-            risks.append("CHoCH de 1m ainda em formação (entrada por mitigação direta).")
+            risks.append("CHoCH de 1m ainda em formação.")
 
-        # 7. RISCO / RETORNO (Mínimo 3R) - 15 pts
+        # 7. RISCO / RETORNO (Mínimo 3R) - 10 pts
         direction = 'BUY' if opp.direction == 'BULLISH' else 'SELL'
         if direction == 'BUY':
             stop_loss = opp.poi_low * (1 - self.buffer_percent)
@@ -151,19 +150,16 @@ class AnalystAgent:
             rr_ratio = (cp - take_profit_2) / risk
 
         if rr_ratio >= config.MIN_RISK_REWARD:
-            score += 15
-            breakdown['Risco/Retorno'] = 15
-            reasons.append(f"Excelente Relação Risco:Retorno (1:{rr_ratio:.2f} >= 1:3.0).")
-        elif rr_ratio >= 2.0:
             score += 10
             breakdown['Risco/Retorno'] = 10
+            reasons.append(f"Excelente Relação Risco:Retorno (1:{rr_ratio:.2f} >= 1:3.0).")
         else:
             score += 5
             breakdown['Risco/Retorno'] = 5
-            risks.append("Relação R:R abaixo de 1:3.")
 
-        # Classificação do Tipo de Alerta
-        if score >= config.ENTRY_ALERT_MIN_SCORE:
+        # REGRA RIGOROSA DE OTIMIZAÇÃO:
+        # Para ser ENTRY_ELIGIBLE (Score >= 80), É OBRIGATÓRIO TER SWEEP DA LIQUIDEZ DO PIVÔ!
+        if score >= config.ENTRY_ALERT_MIN_SCORE and opp.has_sweep:
             alert_type = 'ENTRY_ELIGIBLE'
         elif score >= config.PRE_ALERT_MIN_SCORE:
             alert_type = 'PRE_ALERT'
