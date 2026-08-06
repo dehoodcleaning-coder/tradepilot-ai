@@ -10,11 +10,9 @@ logger = logging.getLogger(__name__)
 
 class MessengerAgent:
     """
-    📢 MESSENGER AGENT (THREADED PRO EDITION)
-    Conecta visualmente as mensagens via Telegram Reply-to-Message (Tópicos Encadeados):
-    1. 👀 PRÓ-ALERTA -> Gera a primeira mensagem e salva o ID.
-    2. 🚀 ALERTA OFICIAL DE ENTRADA -> Responde (Reply) DIRETAMENTE na mensagem do Pró-Alerta!
-    3. ❌ INVALIDAÇÃO -> Se o setup for cancelado, responde DIRETAMENTE na mensagem do Pró-Alerta!
+    📢 MESSENGER AGENT (ULTRA-FAST & CLEAN EDITION)
+    Formata e envia alertas no Telegram com máxima velocidade e clareza visual.
+    Suporta controle de fotos via config.SEND_CHART_IMAGES (default: False para máxima velocidade).
     """
 
     def __init__(self, bot_token: str, chat_id: str):
@@ -107,47 +105,42 @@ class MessengerAgent:
         else:
             text = self.format_entry_alert(eval_res, is_reply=is_reply)
 
-        chart_file = ChartGenerator.generate_signal_chart(eval_res, f"chart_{eval_res.opportunity.symbol.replace('/', '_')}.png")
-
         if not self.bot_token or not self.chat_id:
             print("\n" + "=" * 60)
             print(f"[MOCK TELEGRAM DISPATCH - {eval_res.alert_type} (Reply To: {reply_to_message_id})]:")
             print(text)
             print("=" * 60 + "\n")
-            if chart_file and os.path.exists(chart_file):
-                os.remove(chart_file)
             return 999 # Mock ID
 
-        sent_msg_id = None
+        # Se a foto estiver HABILITADA no config, tenta enviar foto
+        if config.SEND_CHART_IMAGES:
+            chart_file = ChartGenerator.generate_signal_chart(eval_res, f"chart_{eval_res.opportunity.symbol.replace('/', '_')}.png")
+            if chart_file and os.path.exists(chart_file):
+                try:
+                    with open(chart_file, 'rb') as photo_file:
+                        payload = {
+                            "chat_id": self.chat_id,
+                            "caption": text,
+                            "parse_mode": "HTML"
+                        }
+                        if reply_to_message_id:
+                            payload["reply_to_message_id"] = reply_to_message_id
 
-        # Tenta enviar como FOTO com legenda (suportando reply_to_message_id)
-        if chart_file and os.path.exists(chart_file):
-            try:
-                with open(chart_file, 'rb') as photo_file:
-                    payload = {
-                        "chat_id": self.chat_id,
-                        "caption": text,
-                        "parse_mode": "HTML"
-                    }
-                    if reply_to_message_id:
-                        payload["reply_to_message_id"] = reply_to_message_id
+                        files = {"photo": photo_file}
+                        res = requests.post(self.api_url_photo, data=payload, files=files, timeout=15)
+                        data = res.json()
+                        os.remove(chart_file)
 
-                    files = {"photo": photo_file}
-                    res = requests.post(self.api_url_photo, data=payload, files=files, timeout=15)
-                    data = res.json()
-                    
-                    os.remove(chart_file)
+                        if data.get("ok"):
+                            sent_msg_id = data["result"]["message_id"]
+                            logger.info(f"✨ Alerta + FOTO enviado com SUCESSO via Telegram (Msg #{sent_msg_id})!")
+                            return sent_msg_id
+                except Exception as e:
+                    logger.error(f"Erro ao enviar foto no Telegram: {e}")
+                    if os.path.exists(chart_file):
+                        os.remove(chart_file)
 
-                    if data.get("ok"):
-                        sent_msg_id = data["result"]["message_id"]
-                        logger.info(f"✨ Alerta {eval_res.alert_type} (Msg #{sent_msg_id}) enviado com SUCESSO via Telegram!")
-                        return sent_msg_id
-            except Exception as e:
-                logger.error(f"Erro ao enviar foto no Telegram: {e}")
-                if os.path.exists(chart_file):
-                    os.remove(chart_file)
-
-        # Fallback: Mensagem de texto (suportando reply_to_message_id)
+        # Envio Direto e Instantâneo por MENSAGEM DE TEXTO LIMPA E FORMATADA
         try:
             payload = {
                 "chat_id": self.chat_id,
@@ -161,7 +154,11 @@ class MessengerAgent:
             res = requests.post(self.api_url_text, json=payload, timeout=10)
             data = res.json()
             if data.get("ok"):
-                return data["result"]["message_id"]
+                sent_msg_id = data["result"]["message_id"]
+                logger.info(f"✨ Alerta TEXTO enviado com SUCESSO via Telegram (Msg #{sent_msg_id})!")
+                return sent_msg_id
+            else:
+                logger.error(f"Erro na API do Telegram sendMessage: {data.get('description')}")
         except Exception as e:
             logger.error(f"Exceção ao enviar mensagem texto Telegram: {e}")
         

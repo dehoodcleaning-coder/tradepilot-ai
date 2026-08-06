@@ -7,6 +7,9 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# Configuração de Imagem do Gráfico (True = Envia Foto do Gráfico | False = Envia apenas texto limpo e rápido)
+SEND_CHART_IMAGES = os.getenv("SEND_CHART_IMAGES", "false").lower() == "true"
+
 # Configurações do Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
