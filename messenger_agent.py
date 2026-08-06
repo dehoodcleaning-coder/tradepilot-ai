@@ -1,24 +1,25 @@
 import requests
 import logging
+import os
 from typing import Dict, Optional
 from analyst_agent import EvaluationResult
+from chart_generator import ChartGenerator
 import config
 
 logger = logging.getLogger(__name__)
 
 class MessengerAgent:
     """
-    📢 MESSENGER AGENT (PEIXE GRANDE EDITION)
-    Formata alertas elegantes no Telegram com a classificação do Cenário do Vídeo:
-    - Cenário 1: Reversão por Captura de Liquidez (Sweep + FVG + POI)
-    - Cenário 2: Continuidade de Fluxo Institucional (BOS + OB)
-    - Cenário 3: Reação no POI com Confirmação no 1m
+    📢 MESSENGER AGENT (PEIXE GRANDE CHART EDITION)
+    Gera o gráfico em tempo real (Candlesticks, POI, Entrada, Stop Loss, TPs)
+    e envia como FOTO com legenda explicativa via Telegram sendPhoto API.
     """
 
     def __init__(self, bot_token: str, chat_id: str):
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.api_url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        self.api_url_text = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        self.api_url_photo = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
 
     def format_pre_alert(self, eval_res: EvaluationResult) -> str:
         opp = eval_res.opportunity
@@ -33,11 +34,11 @@ class MessengerAgent:
             f"📌 <b>Ativo:</b> <code>{opp.symbol}</code> | <b>Direção:</b> {dir_str}\n"
             f"📊 <b>Score Técnico:</b> <code>{eval_res.total_score}/100 pts</code> ⚠️ (Em Desenvolvimento)\n"
             f"⏱ <b>Timeframes:</b> 15m Contexto ➔ 5m POI\n\n"
-            f"🔎 <b>Zona de Interesse (POI 5m):</b> <code>{opp.poi_low:.4f} - {opp.poi_high:.4f}</code>\n"
+            f"🔎 <b>Zona do POI (5m):</b> <code>{opp.poi_low:.4f} - {opp.poi_high:.4f}</code>\n"
             f"💵 <b>Preço Atual:</b> <code>{eval_res.entry_price:.4f}</code>\n\n"
             f"💡 <b>Racional Técnico:</b>\n{reasons_txt}\n\n"
             f"⚠️ <b>Fatores de Atenção:</b>\n{risks_txt}\n\n"
-            f"📋 <i>Aguardando confirmação do gatilho CHoCH no 1m e pontuação >= 80 pts.</i>"
+            f"📋 <i>Aguardando confirmação do CHoCH no 1m e pontuação >= 80 pts.</i>"
         )
         return msg
 
@@ -56,8 +57,7 @@ class MessengerAgent:
         msg = (
             f"{header}\n\n"
             f"🎬 <b>Setup Peixe Grande:</b>\n<code>{eval_res.setup_scenario}</code>\n\n"
-            f"📌 <b>Ativo:</b> <code>{opp.symbol}</code>\n"
-            f"⚡ <b>Direção:</b> {dir_str}\n"
+            f"📌 <b>Ativo:</b> <code>{opp.symbol}</code> | <b>Direção:</b> {dir_str}\n"
             f"⭐ <b>Score do Setup:</b> <b><code>{eval_res.total_score} / 100 PTS</code></b> ✅\n"
             f"⚖️ <b>Relação Risco:Retorno:</b> <b>1:{eval_res.rr_ratio}</b>\n\n"
             f"📥 <b>Preço de Entrada:</b> <code>{eval_res.entry_price:.4f}</code>\n"
@@ -79,29 +79,53 @@ class MessengerAgent:
         else:
             text = self.format_entry_alert(eval_res)
 
+        # Gera o Gráfico Visual
+        chart_file = ChartGenerator.generate_signal_chart(eval_res, f"chart_{eval_res.opportunity.symbol.replace('/', '_')}.png")
+
         if not self.bot_token or not self.chat_id:
             print("\n" + "=" * 60)
             print(f"[MOCK TELEGRAM DISPATCH - {eval_res.alert_type}]:")
             print(text)
             print("=" * 60 + "\n")
+            if chart_file and os.path.exists(chart_file):
+                os.remove(chart_file)
             return False
 
-        payload = {
-            "chat_id": self.chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True
-        }
+        # Tenta enviar como FOTO com legenda
+        if chart_file and os.path.exists(chart_file):
+            try:
+                with open(chart_file, 'rb') as photo_file:
+                    payload = {
+                        "chat_id": self.chat_id,
+                        "caption": text,
+                        "parse_mode": "HTML"
+                    }
+                    files = {"photo": photo_file}
+                    res = requests.post(self.api_url_photo, data=payload, files=files, timeout=15)
+                    data = res.json()
+                    
+                    os.remove(chart_file) # Remove arquivo temporário
 
+                    if data.get("ok"):
+                        logger.info(f"✨ Alerta + GRÁFICO enviado com SUCESSO via Telegram para {eval_res.opportunity.symbol}!")
+                        return True
+                    else:
+                        logger.warning(f"Falha sendPhoto ({data.get('description')}). Enviando apenas texto...")
+            except Exception as e:
+                logger.error(f"Erro ao enviar foto no Telegram: {e}")
+                if os.path.exists(chart_file):
+                    os.remove(chart_file)
+
+        # Fallback: Envia como mensagem de texto normal
         try:
-            res = requests.post(self.api_url, json=payload, timeout=10)
-            data = res.json()
-            if data.get("ok"):
-                logger.info(f"Alerta {eval_res.alert_type} enviado com sucesso para {eval_res.opportunity.symbol}")
-                return True
-            else:
-                logger.error(f"Erro na API do Telegram: {data.get('description')}")
-                return False
+            payload = {
+                "chat_id": self.chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True
+            }
+            res = requests.post(self.api_url_text, json=payload, timeout=10)
+            return res.json().get("ok", False)
         except Exception as e:
-            logger.error(f"Exceção ao enviar alerta Telegram: {e}")
+            logger.error(f"Exceção ao enviar mensagem texto Telegram: {e}")
             return False
