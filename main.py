@@ -1,30 +1,22 @@
 import time
-import datetime
 import logging
-from typing import Dict
-
-import config
+from typing import Dict, Any
 from binance_client import BinanceMarketClient
 from scout_agent import ScoutAgent
 from analyst_agent import AnalystAgent
 from messenger_agent import MessengerAgent
 from learning_agent import LearningAgent
+import config
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
-    handlers=[logging.StreamHandler()]
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger("TradePilotAI")
+logger = logging.getLogger("TradePilotMain")
 
 def main():
-    print("=" * 70)
-    print(f"🚀 INICIANDO {config.PROJECT_NAME} (VERSÃO {config.VERSION})")
-    print("=" * 70)
-    print(f"📌 Mercado / Pares: {', '.join(config.SYMBOLS)}")
-    print(f"⏱ Timeframes: Contexto 15m | Estrutura 5m | Gatilho 1m")
-    print(f"⭐ Scores: Pró-Alerta >= {config.PRE_ALERT_MIN_SCORE} pts | Entrada Oficial >= {config.ENTRY_ALERT_MIN_SCORE} pts (R:R >= 3:1)")
-    print("=" * 70)
+    logger.info("🚀 INICIALIZANDO TRADEPILOT AI MULTI-AGENT SYSTEM (VERSÃO THREADED PRO)")
+    logger.info(f"📊 Símbolos Monitorados: {config.SYMBOLS}")
 
     client = BinanceMarketClient()
     scout = ScoutAgent(client)
@@ -32,47 +24,64 @@ def main():
     messenger = MessengerAgent(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
     learning = LearningAgent()
 
-    last_alert_time: Dict[str, datetime.datetime] = {}
+    # Rastreia cooldown por símbolo e pré-alertas ativos
+    last_alert_time: Dict[str, float] = {}
+    active_pre_alerts: Dict[str, Dict[str, Any]] = {} # symbol -> {setup_id, telegram_msg_id, timestamp}
+
+    logger.info("✅ Todos os Agentes Inicializados. Iniciando varredura contínua do mercado 24/7...")
 
     while True:
         try:
-            logger.info("Escaneando mercado com a rede de agentes TradePilot AI...")
             for symbol in config.SYMBOLS:
-                now = datetime.datetime.now()
-
-                # Cooldown de Alerta para o mesmo símbolo
+                current_time = time.time()
+                
+                # Respeita o Cooldown de 15 min por símbolo
                 if symbol in last_alert_time:
-                    elapsed = (now - last_alert_time[symbol]).total_seconds() / 60.0
-                    if elapsed < config.COOLDOWN_MINUTES_PER_SYMBOL:
+                    elapsed_min = (current_time - last_alert_time[symbol]) / 60.0
+                    if elapsed_min < config.COOLDOWN_MINUTES_PER_SYMBOL:
                         continue
 
-                # 1. SCOUT AGENT: Escaneia o mercado
+                # 1. Scout Agent busca a oportunidade
                 opp = scout.scan_symbol(symbol)
                 if not opp:
                     continue
 
-                # 2. ANALYST AGENT: Avalia no modelo de 100 pontos
+                # 2. Analyst Agent avalia e pontua o setup
                 eval_res = analyst.evaluate_opportunity(opp)
-
-                # Se o setup for rejeitado (score < 65), ignora
                 if eval_res.alert_type == 'REJECTED':
                     continue
 
-                # 3. LEARNING AGENT: Registra para histórico e métricas de win rate
-                learning.record_evaluation(eval_res)
+                # 3. Verifica se existe um Pró-Alerta ativo para encadear a resposta (Threading)
+                active_pre = active_pre_alerts.get(symbol)
+                reply_msg_id = active_pre['telegram_msg_id'] if active_pre else None
 
-                # 4. MESSENGER AGENT: Dispara notificação formatada para o Telegram
-                logger.info(f"✨ OPORTUNIDADE DETECTADA [{eval_res.alert_type}]: {symbol} (Score: {eval_res.total_score}/100)")
-                messenger.send_alert(eval_res)
-                last_alert_time[symbol] = now
+                # 4. Messenger Agent dispara o alerta (FOTO + HTML + Reply)
+                sent_msg_id = messenger.send_alert(eval_res, reply_to_message_id=reply_msg_id)
 
-            time.sleep(config.POLL_INTERVAL_SECONDS)
+                if sent_msg_id:
+                    # 5. Learning Agent persiste o setup com o ID da mensagem no Telegram
+                    setup_id = learning.save_setup(eval_res, telegram_message_id=sent_msg_id)
+                    last_alert_time[symbol] = current_time
+
+                    if eval_res.alert_type == 'PRE_ALERT':
+                        active_pre_alerts[symbol] = {
+                            "setup_id": setup_id,
+                            "telegram_msg_id": sent_msg_id,
+                            "timestamp": current_time
+                        }
+                    elif eval_res.alert_type == 'ENTRY_ELIGIBLE':
+                        # Limpa o pré-alerta ativo pois a entrada oficial já foi confirmada
+                        if symbol in active_pre_alerts:
+                            del active_pre_alerts[symbol]
+
+            # Intervalo de varredura (30 segundos)
+            time.sleep(30)
 
         except KeyboardInterrupt:
-            print("\n👋 TradePilot AI encerrado pelo usuário.")
+            logger.info("🛑 TradePilot AI encerrado pelo usuário.")
             break
         except Exception as e:
-            logger.error(f"Erro no loop principal: {e}")
+            logger.error(f"Erro inesperado no loop principal: {e}")
             time.sleep(10)
 
 if __name__ == "__main__":

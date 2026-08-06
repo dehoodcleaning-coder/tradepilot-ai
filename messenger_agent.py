@@ -1,7 +1,7 @@
 import requests
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from analyst_agent import EvaluationResult
 from chart_generator import ChartGenerator
 import config
@@ -10,10 +10,11 @@ logger = logging.getLogger(__name__)
 
 class MessengerAgent:
     """
-    📢 MESSENGER AGENT (VISUAL PRO EDITION)
-    Diferencia visualmente e de forma INCONFUNDÍVEL os dois tipos de notificação:
-    1. 👀 PRÓ-ALERTA (Apenas Aviso de Setup em Formação - NÃO ENTRAR)
-    2. 🚀 ALERTA OFICIAL DE ENTRADA (Ordem Pronta para Executar)
+    📢 MESSENGER AGENT (THREADED PRO EDITION)
+    Conecta visualmente as mensagens via Telegram Reply-to-Message (Tópicos Encadeados):
+    1. 👀 PRÓ-ALERTA -> Gera a primeira mensagem e salva o ID.
+    2. 🚀 ALERTA OFICIAL DE ENTRADA -> Responde (Reply) DIRETAMENTE na mensagem do Pró-Alerta!
+    3. ❌ INVALIDAÇÃO -> Se o setup for cancelado, responde DIRETAMENTE na mensagem do Pró-Alerta!
     """
 
     def __init__(self, bot_token: str, chat_id: str):
@@ -23,9 +24,6 @@ class MessengerAgent:
         self.api_url_photo = f"https://api.telegram.org/bot{self.bot_token}/sendPhoto"
 
     def format_pre_alert(self, eval_res: EvaluationResult) -> str:
-        """
-        👀 PRÓ-ALERTA: Formato Compacto Amarelo/Laranja (Apenas Observação)
-        """
         opp = eval_res.opportunity
         dir_str = "🟢 COMPRA (LONG)" if eval_res.direction == 'BUY' else "🔴 VENDA (SHORT)"
         reasons_txt = "\n".join([f"  • {r}" for r in eval_res.technical_reasons[:2]])
@@ -41,26 +39,25 @@ class MessengerAgent:
             f"🔎 <b>Faixa do POI (5m):</b> <code>{opp.poi_low:.4f} - {opp.poi_high:.4f}</code>\n"
             f"💵 <b>Preço Atual:</b> <code>{eval_res.entry_price:.4f}</code>\n\n"
             f"💡 <b>Observações:</b>\n{reasons_txt}\n\n"
-            f"⏳ <i>Aguarde a confirmação de entrada e o disparo do Alerta Oficial!</i>"
+            f"⏳ <i>Aguarde a confirmação de entrada neste mesmo tópico!</i>"
         )
         return msg
 
-    def format_entry_alert(self, eval_res: EvaluationResult) -> str:
-        """
-        🚀 ALERTA OFICIAL DE ENTRADA: Formato Completo e Destacado (Pronto para Execução)
-        """
+    def format_entry_alert(self, eval_res: EvaluationResult, is_reply: bool = False) -> str:
         opp = eval_res.opportunity
+        reply_badge = " ↩️ (CONFIRMAÇÃO DO PRÓ-ALERTA ANTERIOR)" if is_reply else ""
+
         if eval_res.direction == 'BUY':
             header_banner = (
                 f"🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢\n"
-                f"🚀 <b>[ALERTA OFICIAL DE ENTRADA - COMPRA (LONG)]</b>\n"
+                f"🚀 <b>[ALERTA OFICIAL DE ENTRADA - COMPRA (LONG)]</b>{reply_badge}\n"
                 f"🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢🟢"
             )
             dir_str = "🟢 COMPRA (LONG)"
         else:
             header_banner = (
                 f"🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴\n"
-                f"💥 <b>[ALERTA OFICIAL DE ENTRADA - VENDA (SHORT)]</b>\n"
+                f"💥 <b>[ALERTA OFICIAL DE ENTRADA - VENDA (SHORT)]</b>{reply_badge}\n"
                 f"🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴"
             )
             dir_str = "🔴 VENDA (SHORT)"
@@ -88,28 +85,42 @@ class MessengerAgent:
         )
         return msg
 
-    def send_alert(self, eval_res: EvaluationResult) -> bool:
-        if eval_res.alert_type == 'REJECTED':
-            return False
+    def format_invalidation_alert(self, symbol: str, setup_scenario: str, reason: str) -> str:
+        msg = (
+            f"❌ <b>===================================</b>\n"
+            f"🚫 <b>[SETUP INVALIDADO / CANCELADO]</b> ↩️\n"
+            f"❌ <b>===================================</b>\n\n"
+            f"📌 <b>Ativo:</b> <code>{symbol}</code>\n"
+            f"🎬 <b>Cenário:</b> <i>{setup_scenario}</i>\n\n"
+            f"⚠️ <b>Motivo do Cancelamento:</b>\n  • {reason}\n\n"
+            f"🛑 <b>AÇÃO RECOMENDADA:</b> Desconsiderar qualquer ordem limite associada a este POI. O mercado rompeu a estrutura sem confirmar."
+        )
+        return msg
 
+    def send_alert(self, eval_res: EvaluationResult, reply_to_message_id: Optional[int] = None) -> Optional[int]:
+        if eval_res.alert_type == 'REJECTED':
+            return None
+
+        is_reply = reply_to_message_id is not None
         if eval_res.alert_type == 'PRE_ALERT':
             text = self.format_pre_alert(eval_res)
         else:
-            text = self.format_entry_alert(eval_res)
+            text = self.format_entry_alert(eval_res, is_reply=is_reply)
 
-        # Gera o Gráfico Visual
         chart_file = ChartGenerator.generate_signal_chart(eval_res, f"chart_{eval_res.opportunity.symbol.replace('/', '_')}.png")
 
         if not self.bot_token or not self.chat_id:
             print("\n" + "=" * 60)
-            print(f"[MOCK TELEGRAM DISPATCH - {eval_res.alert_type}]:")
+            print(f"[MOCK TELEGRAM DISPATCH - {eval_res.alert_type} (Reply To: {reply_to_message_id})]:")
             print(text)
             print("=" * 60 + "\n")
             if chart_file and os.path.exists(chart_file):
                 os.remove(chart_file)
-            return False
+            return 999 # Mock ID
 
-        # Tenta enviar como FOTO com legenda
+        sent_msg_id = None
+
+        # Tenta enviar como FOTO com legenda (suportando reply_to_message_id)
         if chart_file and os.path.exists(chart_file):
             try:
                 with open(chart_file, 'rb') as photo_file:
@@ -118,23 +129,25 @@ class MessengerAgent:
                         "caption": text,
                         "parse_mode": "HTML"
                     }
+                    if reply_to_message_id:
+                        payload["reply_to_message_id"] = reply_to_message_id
+
                     files = {"photo": photo_file}
                     res = requests.post(self.api_url_photo, data=payload, files=files, timeout=15)
                     data = res.json()
                     
-                    os.remove(chart_file) # Remove arquivo temporário
+                    os.remove(chart_file)
 
                     if data.get("ok"):
-                        logger.info(f"✨ Alerta {eval_res.alert_type} + GRÁFICO enviado com SUCESSO via Telegram!")
-                        return True
-                    else:
-                        logger.warning(f"Falha sendPhoto ({data.get('description')}). Enviando apenas texto...")
+                        sent_msg_id = data["result"]["message_id"]
+                        logger.info(f"✨ Alerta {eval_res.alert_type} (Msg #{sent_msg_id}) enviado com SUCESSO via Telegram!")
+                        return sent_msg_id
             except Exception as e:
                 logger.error(f"Erro ao enviar foto no Telegram: {e}")
                 if os.path.exists(chart_file):
                     os.remove(chart_file)
 
-        # Fallback: Envia como mensagem de texto normal
+        # Fallback: Mensagem de texto (suportando reply_to_message_id)
         try:
             payload = {
                 "chat_id": self.chat_id,
@@ -142,8 +155,32 @@ class MessengerAgent:
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True
             }
+            if reply_to_message_id:
+                payload["reply_to_message_id"] = reply_to_message_id
+
+            res = requests.post(self.api_url_text, json=payload, timeout=10)
+            data = res.json()
+            if data.get("ok"):
+                return data["result"]["message_id"]
+        except Exception as e:
+            logger.error(f"Exceção ao enviar mensagem texto Telegram: {e}")
+        
+        return None
+
+    def send_invalidation(self, symbol: str, setup_scenario: str, reason: str, reply_to_message_id: int) -> bool:
+        if not self.bot_token or not self.chat_id:
+            return False
+
+        text = self.format_invalidation_alert(symbol, setup_scenario, reason)
+        try:
+            payload = {
+                "chat_id": self.chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "reply_to_message_id": reply_to_message_id
+            }
             res = requests.post(self.api_url_text, json=payload, timeout=10)
             return res.json().get("ok", False)
         except Exception as e:
-            logger.error(f"Exceção ao enviar mensagem texto Telegram: {e}")
+            logger.error(f"Erro ao enviar invalidação no Telegram: {e}")
             return False
