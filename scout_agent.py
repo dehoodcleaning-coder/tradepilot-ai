@@ -17,15 +17,16 @@ class ScoutOpportunity:
     current_price: float
     poi_high: float
     poi_low: float
+    swept_pivot_level: float
     has_fvg: bool
     has_sweep: bool
     timestamp: pd.Timestamp
 
 class ScoutAgent:
     """
-    🕵️ SCOUT AGENT
-    Monitora os mercados 24/7, analisa a estrutura de 15m e 5m, e identifica
-    oportunidades brutas em desenvolvimento para repassar ao Analyst Agent.
+    🕵️ SCOUT AGENT (PEIXE GRANDE PIVOT & POI ENGINE)
+    Identifica com máxima precisão os Pivôs de Alta e Pivôs de Baixa (Topos e Fundos Relevantes),
+    verifica a varredura da liquidez desse pivô (Sweep) e mapeia o POI de origem.
     """
 
     def __init__(self, client: BinanceMarketClient):
@@ -52,9 +53,6 @@ class ScoutAgent:
         return df
 
     def scan_symbol(self, symbol: str) -> Optional[ScoutOpportunity]:
-        """
-        Escaneia um símbolo específico buscando formações de POI e Liquidez.
-        """
         df_15m = self.client.fetch_ohlcv_df(symbol, timeframe=config.CONTEXT_TIMEFRAME, limit=100)
         df_5m = self.client.fetch_ohlcv_df(symbol, timeframe=config.STRUCTURE_TIMEFRAME, limit=100)
         df_1m = self.client.fetch_ohlcv_df(symbol, timeframe=config.TRIGGER_TIMEFRAME, limit=100)
@@ -68,10 +66,12 @@ class ScoutAgent:
         current_price = df_1m['close'].iloc[-1]
         df_5m_swings = self.find_swings(df_5m)
 
-        # Procura por Order Blocks e FVGs relevantes no 5m
+        swing_highs = df_5m_swings[df_5m_swings['is_swing_high']]
+        swing_lows = df_5m_swings[df_5m_swings['is_swing_low']]
+
         n_5m = len(df_5m)
         for i in range(n_5m - 15, n_5m - 2):
-            # Bullish POI Candidate
+            # 🟢 BULLISH POI (Origem da varredura de fundo / SSL Sweep)
             is_bullish_impulse = (df_5m['close'].iloc[i+1] > df_5m['open'].iloc[i+1]) and \
                                  (df_5m['close'].iloc[i+2] > df_5m['high'].iloc[i])
             
@@ -79,10 +79,18 @@ class ScoutAgent:
                 ob_low = df_5m['low'].iloc[i]
                 ob_high = max(df_5m['high'].iloc[i], df_5m['open'].iloc[i])
 
-                # Se o preço atual está próximo da zona (dentro ou aproximando do POI)
                 if ob_low * 0.998 <= current_price <= ob_high * 1.003:
                     has_fvg = df_5m['low'].iloc[i+2] > df_5m['high'].iloc[i]
-                    has_sweep = df_5m['low'].iloc[i] < df_5m_swings['low'].tail(20).min()
+                    
+                    # Verifica se a mínima deste candle ou do anterior varreu um Pivô de Baixa anterior
+                    past_lows = swing_lows[swing_lows.index < i]['low']
+                    has_sweep = False
+                    swept_level = 0.0
+                    if not past_lows.empty:
+                        last_pivot_low = past_lows.iloc[-1]
+                        if df_5m['low'].iloc[i] <= last_pivot_low or df_5m['low'].iloc[i-1] <= last_pivot_low:
+                            has_sweep = True
+                            swept_level = float(last_pivot_low)
 
                     return ScoutOpportunity(
                         symbol=symbol,
@@ -93,12 +101,13 @@ class ScoutAgent:
                         current_price=current_price,
                         poi_high=ob_high,
                         poi_low=ob_low,
+                        swept_pivot_level=swept_level,
                         has_fvg=has_fvg,
                         has_sweep=has_sweep,
                         timestamp=pd.Timestamp.now()
                     )
 
-            # Bearish POI Candidate
+            # 🔴 BEARISH POI (Origem da varredura de topo / BSL Sweep)
             is_bearish_impulse = (df_5m['close'].iloc[i+1] < df_5m['open'].iloc[i+1]) and \
                                  (df_5m['close'].iloc[i+2] < df_5m['low'].iloc[i])
 
@@ -108,7 +117,16 @@ class ScoutAgent:
 
                 if ob_low * 0.997 <= current_price <= ob_high * 1.002:
                     has_fvg = df_5m['high'].iloc[i+2] < df_5m['low'].iloc[i]
-                    has_sweep = df_5m['high'].iloc[i] > df_5m_swings['high'].tail(20).max()
+                    
+                    # Verifica se a máxima deste candle ou do anterior varreu um Pivô de Alta anterior
+                    past_highs = swing_highs[swing_highs.index < i]['high']
+                    has_sweep = False
+                    swept_level = 0.0
+                    if not past_highs.empty:
+                        last_pivot_high = past_highs.iloc[-1]
+                        if df_5m['high'].iloc[i] >= last_pivot_high or df_5m['high'].iloc[i-1] >= last_pivot_high:
+                            has_sweep = True
+                            swept_level = float(last_pivot_high)
 
                     return ScoutOpportunity(
                         symbol=symbol,
@@ -119,6 +137,7 @@ class ScoutAgent:
                         current_price=current_price,
                         poi_high=ob_high,
                         poi_low=ob_low,
+                        swept_pivot_level=swept_level,
                         has_fvg=has_fvg,
                         has_sweep=has_sweep,
                         timestamp=pd.Timestamp.now()
