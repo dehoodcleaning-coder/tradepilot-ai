@@ -26,11 +26,9 @@ class EvaluationResult:
 
 class AnalystAgent:
     """
-    🧠 ANALYST AGENT (OPTIMIZED PEIXE GRANDE SMC ENGINE)
-    Aplica as 4 Regras de Ouro de Otimização:
-    1. Torna a Captura de Liquidez (Sweep de Pivô) mandatória para o Score 80+.
-    2. Exige Fair Value Gap (FVG) no deslocamento.
-    3. Recomenda Mover Stop para 0.0 (Break-Even) no TP1.
+    🧠 ANALYST AGENT (PEIXE GRANDE RSI DIVERGENCE EDITION)
+    Integra a validação da Divergência Institucional no RSI(14) (Escadinha de Exaustão):
+    - Confirma se o rompimento do pivô foi um falso rompimento para captura de liquidez (Sweep).
     """
 
     def __init__(self, buffer_percent: float = 0.0005):
@@ -66,7 +64,7 @@ class AnalystAgent:
             breakdown['Contexto (15m)'] = 5
             risks.append("Operação contra a tendência primária de 15m.")
 
-        # 2. MAPEAMENTO DE LIQUIDEZ (SSL / BSL) - 20 pts (PESO AUMENTADO)
+        # 2. CAPTURA DE LIQUIDEZ (SWEEP DO PIVÔ) - 20 pts
         if opp.has_sweep:
             score += 20
             breakdown['Liquidez (Sweep)'] = 20
@@ -79,7 +77,17 @@ class AnalystAgent:
             breakdown['Liquidez (Sweep)'] = 0
             risks.append("CRÍTICO: Liquidez ainda não varrida (alto risco de stop por indução).")
 
-        # 3. QUALIDADE DO SWEEP (Rejeição de Pavio) - 15 pts
+        # 3. DIVERGÊNCIA DE RSI (14) - 15 pts (NOVO MÓDULO PEIXE GRANDE)
+        if opp.has_rsi_divergence:
+            score += 15
+            breakdown['Divergência RSI(14)'] = 15
+            reasons.append("Divergência no RSI(14) confirmada! (Preço renovou pivô mas RSI fez escada de exaustão).")
+        else:
+            score += 5
+            breakdown['Divergência RSI(14)'] = 5
+            risks.append("Sem divergência nítida de RSI(14) no rompimento do pivô.")
+
+        # 4. QUALIDADE DO SWEEP (Rejeição de Pavio) - 15 pts
         candle_5m = df_5m.iloc[-1]
         wick_size = abs(candle_5m['high'] - candle_5m['low'])
         body_size = abs(candle_5m['close'] - candle_5m['open'])
@@ -90,17 +98,6 @@ class AnalystAgent:
         else:
             score += 10
             breakdown['Absorção (Pavio)'] = 10
-
-        # 4. DESLOCAMENTO (Displacement / Impulso) - 15 pts
-        vol_5m = df_5m['volume'].tail(5).mean()
-        avg_vol = df_5m['volume'].mean()
-        if vol_5m > avg_vol * 1.2:
-            score += 15
-            breakdown['Deslocamento'] = 15
-            reasons.append("Deslocamento de preço agressivo com volume institucional elevado.")
-        else:
-            score += 10
-            breakdown['Deslocamento'] = 10
 
         # 5. POI & FAIR VALUE GAP (FVG) - 10 pts
         if opp.has_fvg:
@@ -160,7 +157,7 @@ class AnalystAgent:
             score += 5
             breakdown['Risco/Retorno'] = 5
 
-        # REGRA RIGOROSA DE OTIMIZAÇÃO:
+        # REGRA RIGOROSA PEIXE GRANDE:
         # Para ser ENTRY_ELIGIBLE (Score >= 80), É OBRIGATÓRIO TER SWEEP DA LIQUIDEZ DO PIVÔ!
         if score >= config.ENTRY_ALERT_MIN_SCORE and opp.has_sweep:
             alert_type = 'ENTRY_ELIGIBLE'

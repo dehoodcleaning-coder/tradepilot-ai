@@ -1,5 +1,6 @@
 import logging
 import pandas as pd
+import numpy as np
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Any
 from binance_client import BinanceMarketClient
@@ -20,17 +21,25 @@ class ScoutOpportunity:
     swept_pivot_level: float
     has_fvg: bool
     has_sweep: bool
+    has_rsi_divergence: bool
     timestamp: pd.Timestamp
 
 class ScoutAgent:
     """
-    🕵️ SCOUT AGENT (PEIXE GRANDE PIVOT & POI ENGINE)
-    Identifica com máxima precisão os Pivôs de Alta e Pivôs de Baixa (Topos e Fundos Relevantes),
-    verifica a varredura da liquidez desse pivô (Sweep) e mapeia o POI de origem.
+    🕵️ SCOUT AGENT (RSI DIVERGENCE & SMC POI ENGINE)
+    Identifica os Pivôs de Alta e Baixa, detecta o rompimento/varredura de liquidez (Sweep)
+    e confirma se o indicador RSI(14) gerou a DIVERGÊNCIA INSTITUCIONAL (Escadinha de Exaustão).
     """
 
     def __init__(self, client: BinanceMarketClient):
         self.client = client
+
+    def calculate_rsi(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0.0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
+        rs = gain / (loss + 1e-9)
+        return 100.0 - (100.0 / (1.0 + rs))
 
     def find_swings(self, df: pd.DataFrame, window: int = 2) -> pd.DataFrame:
         df = df.copy()
@@ -64,6 +73,9 @@ class ScoutAgent:
             return None
 
         current_price = df_1m['close'].iloc[-1]
+        
+        # Calcula RSI de 14 períodos no 5m
+        df_5m['rsi'] = self.calculate_rsi(df_5m, 14)
         df_5m_swings = self.find_swings(df_5m)
 
         swing_highs = df_5m_swings[df_5m_swings['is_swing_high']]
@@ -71,7 +83,7 @@ class ScoutAgent:
 
         n_5m = len(df_5m)
         for i in range(n_5m - 15, n_5m - 2):
-            # 🟢 BULLISH POI (Origem da varredura de fundo / SSL Sweep)
+            # 🟢 BULLISH POI (Origem da varredura de fundo / SSL Sweep + Divergência de RSI)
             is_bullish_impulse = (df_5m['close'].iloc[i+1] > df_5m['open'].iloc[i+1]) and \
                                  (df_5m['close'].iloc[i+2] > df_5m['high'].iloc[i])
             
@@ -82,15 +94,26 @@ class ScoutAgent:
                 if ob_low * 0.998 <= current_price <= ob_high * 1.003:
                     has_fvg = df_5m['low'].iloc[i+2] > df_5m['high'].iloc[i]
                     
-                    # Verifica se a mínima deste candle ou do anterior varreu um Pivô de Baixa anterior
-                    past_lows = swing_lows[swing_lows.index < i]['low']
+                    past_lows = swing_lows[swing_lows.index < i]
                     has_sweep = False
+                    has_rsi_div = False
                     swept_level = 0.0
+                    
                     if not past_lows.empty:
-                        last_pivot_low = past_lows.iloc[-1]
-                        if df_5m['low'].iloc[i] <= last_pivot_low or df_5m['low'].iloc[i-1] <= last_pivot_low:
+                        last_pivot_idx = past_lows.index[-1]
+                        last_pivot_low = past_lows.loc[last_pivot_idx, 'low']
+                        last_pivot_rsi = past_lows.loc[last_pivot_idx, 'rsi']
+
+                        current_low = min(df_5m['low'].iloc[i], df_5m['low'].iloc[i-1])
+                        current_rsi = df_5m['rsi'].iloc[i]
+
+                        # Sweep: Preço fez fundo mais baixo ou rompeu o pivô
+                        if current_low <= last_pivot_low * 1.0005:
                             has_sweep = True
                             swept_level = float(last_pivot_low)
+                            # Divergência de RSI de Alta: Preço faz fundo mais baixo, mas RSI faz fundo mais alto!
+                            if pd.notna(current_rsi) and pd.notna(last_pivot_rsi) and current_rsi > last_pivot_rsi:
+                                has_rsi_div = True
 
                     return ScoutOpportunity(
                         symbol=symbol,
@@ -104,10 +127,11 @@ class ScoutAgent:
                         swept_pivot_level=swept_level,
                         has_fvg=has_fvg,
                         has_sweep=has_sweep,
+                        has_rsi_divergence=has_rsi_div,
                         timestamp=pd.Timestamp.now()
                     )
 
-            # 🔴 BEARISH POI (Origem da varredura de topo / BSL Sweep)
+            # 🔴 BEARISH POI (Origem da varredura de topo / BSL Sweep + Divergência de RSI)
             is_bearish_impulse = (df_5m['close'].iloc[i+1] < df_5m['open'].iloc[i+1]) and \
                                  (df_5m['close'].iloc[i+2] < df_5m['low'].iloc[i])
 
@@ -118,15 +142,26 @@ class ScoutAgent:
                 if ob_low * 0.997 <= current_price <= ob_high * 1.002:
                     has_fvg = df_5m['high'].iloc[i+2] < df_5m['low'].iloc[i]
                     
-                    # Verifica se a máxima deste candle ou do anterior varreu um Pivô de Alta anterior
-                    past_highs = swing_highs[swing_highs.index < i]['high']
+                    past_highs = swing_highs[swing_highs.index < i]
                     has_sweep = False
+                    has_rsi_div = False
                     swept_level = 0.0
+
                     if not past_highs.empty:
-                        last_pivot_high = past_highs.iloc[-1]
-                        if df_5m['high'].iloc[i] >= last_pivot_high or df_5m['high'].iloc[i-1] >= last_pivot_high:
+                        last_pivot_idx = past_highs.index[-1]
+                        last_pivot_high = past_highs.loc[last_pivot_idx, 'high']
+                        last_pivot_rsi = past_highs.loc[last_pivot_idx, 'rsi']
+
+                        current_high = max(df_5m['high'].iloc[i], df_5m['high'].iloc[i-1])
+                        current_rsi = df_5m['rsi'].iloc[i]
+
+                        # Sweep: Preço fez topo mais alto ou rompeu o pivô
+                        if current_high >= last_pivot_high * 0.9995:
                             has_sweep = True
                             swept_level = float(last_pivot_high)
+                            # Divergência de RSI de Baixa: Preço faz topo mais alto, mas RSI faz topo mais baixo!
+                            if pd.notna(current_rsi) and pd.notna(last_pivot_rsi) and current_rsi < last_pivot_rsi:
+                                has_rsi_div = True
 
                     return ScoutOpportunity(
                         symbol=symbol,
@@ -140,6 +175,7 @@ class ScoutAgent:
                         swept_pivot_level=swept_level,
                         has_fvg=has_fvg,
                         has_sweep=has_sweep,
+                        has_rsi_divergence=has_rsi_div,
                         timestamp=pd.Timestamp.now()
                     )
 
