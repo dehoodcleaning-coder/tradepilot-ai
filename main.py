@@ -6,6 +6,7 @@ from scout_agent import ScoutAgent
 from analyst_agent import AnalystAgent
 from messenger_agent import MessengerAgent
 from learning_agent import LearningAgent
+from performance_scheduler import PerformanceScheduler
 import config
 
 logging.basicConfig(
@@ -23,6 +24,10 @@ def main():
     analyst = AnalystAgent()
     messenger = MessengerAgent(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_ID)
     learning = LearningAgent()
+
+    # Inicializa e dispara o Agendador de Performance a cada 12 Horas
+    perf_scheduler = PerformanceScheduler(messenger, client)
+    perf_scheduler.start_scheduler_thread()
 
     # Rastreia cooldown por símbolo e pré-alertas ativos
     last_alert_time: Dict[str, float] = {}
