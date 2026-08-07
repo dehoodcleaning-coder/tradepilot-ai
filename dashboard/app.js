@@ -139,7 +139,8 @@ function renderSignalsFeed(setups) {
 
 // Seleciona um Setup e Atualiza o Gráfico TradingView ao Vivo
 function selectSetupForVisualizer(s) {
-    const tvSym = `BINANCE:${s.symbol.replace('/', '')}`;
+    const symStr = s.symbol || 'BTC/USDT';
+    const tvSym = `BINANCE:${symStr.replace('/', '')}`;
     initTradingViewChart(tvSym);
 
     document.getElementById('setupScenarioTitle').innerText = s.setup_scenario || 'CENÁRIO 1: Reversão por Captura de Liquidez';

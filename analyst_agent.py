@@ -70,7 +70,10 @@ class AnalystAgent:
         if opp.has_sweep:
             score += 20
             breakdown['Liquidez (Sweep)'] = 20
-            reasons.append(f"Captura de Liquidez (Stop Hunt) confirmada no Pivô [{opp.swept_pivot_level:.4f}] antes da entrada.")
+            if opp.swept_pivot_level > 0:
+                reasons.append(f"Captura de Liquidez (Stop Hunt) confirmada no Pivô [{opp.swept_pivot_level:.4f}] antes da entrada.")
+            else:
+                reasons.append("Captura de Liquidez (Stop Hunt da estrutura recente) confirmada antes da entrada.")
         else:
             score += 0
             breakdown['Liquidez (Sweep)'] = 0
