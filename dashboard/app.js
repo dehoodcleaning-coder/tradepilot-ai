@@ -120,9 +120,12 @@ function renderSignalsFeed(setups) {
         const badgeText = isOfficial ? '🚀 ALERTA OFICIAL (ENTRADA)' : '👀 PRÓ-ALERTA (EM TESTE)';
         const dirColor = s.direction === 'BUY' ? '#00e676' : '#ff1744';
 
+        const timeStr = s.created_at ? new Date(s.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : new Date().toLocaleTimeString('pt-BR');
+
         item.innerHTML = `
             <div class="signal-item-header">
                 <span class="signal-type-badge ${badgeClass}">${badgeText}</span>
+                <span class="signal-time" style="font-family: var(--font-mono); font-size: 0.8rem; color: #ffb300; font-weight: 700;">⏰ ${timeStr}</span>
                 <span class="signal-score" style="color: ${dirColor}">${s.total_score}/100 PTS</span>
             </div>
             <div style="display: flex; justify-content: space-between; font-weight: 600; font-size: 0.95rem; margin-bottom: 4px;">
